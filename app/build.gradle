@@ -1,0 +1,32 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.dsh.netcheck'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.dsh.netcheck"
+        // 相容性：minSdk 24 = Android 7.0 起，一路支援到 Android 16（API 36）
+        // Android 13（API 33）已驗證設計上相容：只用 INTERNET 權限、無執行期權限、
+        // 只使用 API 11 級別的介面（getExternalFilesDir / Clipboard / ACTION_SEND）
+        minSdk 24
+        targetSdk 34
+        versionCode 1
+        versionName "1.0"
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+// 完全零依賴，不需要任何外部函式庫
