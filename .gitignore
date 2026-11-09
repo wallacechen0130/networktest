@@ -1,31 +1,26 @@
-# Gradle
+# Android / Gradle
 .gradle/
 build/
-!gradle/wrapper/gradle-wrapper.jar
+captures/
+.externalNativeBuild/
+.cxx/
+local.properties
+*.iml
+.idea/
+.DS_Store
 
-# Android
+# 產出物（APK 走 GitHub Releases，不進版控）
 *.apk
 *.aab
 *.ap_
 *.dex
-*.class
-local.properties
-captures/
-.externalNativeBuild/
-.cxx/
 
-# IDE
-.idea/
-*.iml
-*.ipr
-*.iws
-.vscode/
+# 簽章檔（絕對不要進版控）
+*.jks
+*.keystore
+!debug.keystore
 
-# OS
-.DS_Store
-Thumbs.db
-desktop.ini
-
-# Reports produced by the app (keep source only)
+# 本機測試資料
+netlog/
 reports/
-netcheck_*.txt
+*.log

@@ -23,7 +23,10 @@ import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import java.io.BufferedReader;
 import java.io.ByteArrayOutputStream;
+import java.io.FileInputStream;
+import java.io.InputStreamReader;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.OutputStreamWriter;
@@ -34,6 +37,7 @@ import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Date;
 import java.util.List;
@@ -53,10 +57,11 @@ public class MainActivity extends Activity {
             "UDP DNS   8.8.8.8:53",
             "UDP NTP   216.239.35.4:123",
             "UDP STUN  162.159.207.0:3478",
-            "TCP       1.1.1.1:443"
+            "TCP       1.1.1.1:443",
+            "TCP 遊戲  43.174.218.121:20001"
     };
 
-    static final String[] SHORT = {"DNS", "NTP", "STUN", "TCP"};
+    static final String[] SHORT = {"DNS", "NTP", "STUN", "TCP", "GAME"};
     static final int[] DURATIONS = {60, 180, 300, 600};
     static final String[] DURATION_LABELS = {"60 秒（1 分鐘）", "180 秒（3 分鐘）", "300 秒（5 分鐘）", "600 秒（10 分鐘）"};
     static final int INTERVAL_MS = 600;
@@ -97,6 +102,7 @@ public class MainActivity extends Activity {
     Spinner durationSpinner;
     Button runButton, exportButton, shareButton;
     TextView progressView, timelineView, reportView;
+    LinearLayout historyBox;
 
     final Handler ui = new Handler(Looper.getMainLooper());
     final StringBuilder timeline = new StringBuilder();
@@ -114,6 +120,7 @@ public class MainActivity extends Activity {
         for (int i = 0; i < NAMES.length; i++) stats[i] = new Stat(NAMES[i]);
         buildUi();
         renderStats();
+        refreshHistory();
     }
 
     // ---------------------------------------------------------------- UI
@@ -217,6 +224,16 @@ public class MainActivity extends Activity {
 
         root.addView(btnRow);
 
+        root.addView(sectionTitle("歷史紀錄（每次測完自動儲存）"));
+        historyBox = new LinearLayout(this);
+        historyBox.setOrientation(LinearLayout.VERTICAL);
+        root.addView(historyBox);
+
+        Button clearBtn = new Button(this);
+        clearBtn.setText("清除歷史");
+        clearBtn.setOnClickListener(v -> clearHistory());
+        root.addView(clearBtn);
+
         reportView = new TextView(this);
         reportView.setTextSize(12f);
         reportView.setTypeface(Typeface.MONOSPACE);
@@ -277,7 +294,8 @@ public class MainActivity extends Activity {
                     if (enabled[idx]) { k = idx; break; }
                 }
                 if (k < 0) break;
-                i++;
+                // 從「剛用完那一項的下一格」繼續，否則停用的項目會讓第一項被重複選中
+                i = (k + 1) % NAMES.length;
 
                 Long ms = probe(k);
                 record(k, ms);
@@ -308,6 +326,8 @@ public class MainActivity extends Activity {
         runButton.setText("重新測試");
         buildReport();
         reportView.setText(reportText);
+        saveRun();
+        refreshHistory();
         exportButton.setEnabled(true);
         shareButton.setEnabled(true);
         renderStats();
@@ -339,7 +359,8 @@ public class MainActivity extends Activity {
             case 0: return probeUdpDns();
             case 1: return probeUdpNtp();
             case 2: return probeUdpStun();
-            default: return probeTcp();
+            case 3: return probeTcp("1.1.1.1", 443);
+            default: return probeTcp("43.174.218.121", 20001);
         }
     }
 
@@ -408,11 +429,11 @@ public class MainActivity extends Activity {
         }
     }
 
-    Long probeTcp() {
+    Long probeTcp(String host, int port) {
         Socket s = new Socket();
         try {
             long t0 = System.nanoTime();
-            s.connect(new InetSocketAddress("1.1.1.1", 443), 3000);
+            s.connect(new InetSocketAddress(host, port), 3000);
             return (System.nanoTime() - t0) / 1000000L;
         } catch (Exception e) {
             return null;
@@ -535,6 +556,11 @@ public class MainActivity extends Activity {
             b.append("%：只放行 DNS、其他 UDP 被丟棄。\n");
             b.append("  這是電信端政策／CGNAT 的 UDP 問題，與手機、訊號強度、APN 設定無關。\n");
         }
+        if (stats[4].total > 0 && stats[4].lossPct() >= 10) {
+            b.append("  【遊戲節點】遊戲實際伺服器失敗率 ");
+            b.append(String.format(Locale.US, "%.0f", stats[4].lossPct()));
+            b.append("%，這是遊戲斷線重連的直接原因；對照其他項目即可判斷是線路還是伺服器端。\n");
+        }
         double maxLoss = 0;
         for (Stat s : stats) maxLoss = Math.max(maxLoss, s.lossPct());
         if (maxLoss >= 10) {
@@ -577,5 +603,111 @@ public class MainActivity extends Activity {
         i.putExtra(Intent.EXTRA_SUBJECT, "網路健檢報告");
         i.putExtra(Intent.EXTRA_TEXT, reportText);
         startActivity(Intent.createChooser(i, "分享報告（已同時複製到剪貼簿）"));
+    }
+
+    // ---------------------------------------------------------------- 歷史紀錄
+
+    File historyDir() {
+        File d = new File(getFilesDir(), "history");
+        if (!d.exists()) d.mkdirs();
+        return d;
+    }
+
+    String shortSummary() {
+        StringBuilder b = new StringBuilder();
+        for (int i = 0; i < stats.length; i++) {
+            if (i > 0) b.append(" / ");
+            Stat s = stats[i];
+            b.append(SHORT[i]).append(' ');
+            if (s.total == 0) b.append("--");
+            else b.append(String.format(Locale.US, "%.1f%%", s.lossPct()));
+        }
+        return b.toString();
+    }
+
+    void saveRun() {
+        try {
+            String summary = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(new Date(testStartMs))
+                    + " ｜ " + durationSec + "秒 ｜ " + shortSummary();
+            File f = new File(historyDir(), String.format(Locale.US, "%013d.txt", testStartMs));
+            FileOutputStream fos = new FileOutputStream(f);
+            OutputStreamWriter w = new OutputStreamWriter(fos, "UTF-8");
+            w.write(summary + "\n\n" + reportText);
+            w.close();
+            fos.close();
+        } catch (Exception ignored) { }
+    }
+
+    String readFirstLine(File f) {
+        BufferedReader br = null;
+        try {
+            br = new BufferedReader(new InputStreamReader(new FileInputStream(f), "UTF-8"));
+            String l = br.readLine();
+            return l == null ? f.getName() : l;
+        } catch (Exception e) {
+            return f.getName();
+        } finally {
+            try { if (br != null) br.close(); } catch (Exception ignored) { }
+        }
+    }
+
+    void refreshHistory() {
+        if (historyBox == null) return;
+        historyBox.removeAllViews();
+        File[] fs = historyDir().listFiles();
+        if (fs == null || fs.length == 0) {
+            TextView tv = new TextView(this);
+            tv.setText("尚無紀錄（每次測完會自動存一筆）");
+            tv.setTextSize(13f);
+            tv.setTextColor(Color.parseColor("#888888"));
+            historyBox.addView(tv);
+            return;
+        }
+        Arrays.sort(fs, (a, b) -> b.getName().compareTo(a.getName()));
+        int n = Math.min(fs.length, 20);
+        for (int i = 0; i < n; i++) {
+            final File f = fs[i];
+            TextView tv = new TextView(this);
+            tv.setText("•  " + readFirstLine(f));
+            tv.setTextSize(12f);
+            tv.setTypeface(Typeface.MONOSPACE);
+            tv.setPadding(0, dp(9), 0, dp(9));
+            tv.setOnClickListener(v -> loadRecord(f));
+            historyBox.addView(tv);
+        }
+        if (fs.length > n) {
+            TextView more = new TextView(this);
+            more.setText("…另有 " + (fs.length - n) + " 筆");
+            more.setTextSize(12f);
+            more.setTextColor(Color.parseColor("#888888"));
+            historyBox.addView(more);
+        }
+    }
+
+    void loadRecord(File f) {
+        BufferedReader br = null;
+        try {
+            br = new BufferedReader(new InputStreamReader(new FileInputStream(f), "UTF-8"));
+            StringBuilder sb = new StringBuilder();
+            String line;
+            while ((line = br.readLine()) != null) sb.append(line).append('\n');
+            reportText = sb.toString();
+            reportView.setText(reportText);
+            exportButton.setEnabled(true);
+            shareButton.setEnabled(true);
+            Toast.makeText(this, "已載入該次紀錄（下方報告區）", Toast.LENGTH_SHORT).show();
+        } catch (Exception e) {
+            Toast.makeText(this, "讀取失敗", Toast.LENGTH_SHORT).show();
+        } finally {
+            try { if (br != null) br.close(); } catch (Exception ignored) { }
+        }
+    }
+
+    void clearHistory() {
+        File[] fs = historyDir().listFiles();
+        int n = 0;
+        if (fs != null) for (File f : fs) if (f.delete()) n++;
+        Toast.makeText(this, "已清除 " + n + " 筆紀錄", Toast.LENGTH_SHORT).show();
+        refreshHistory();
     }
 }
