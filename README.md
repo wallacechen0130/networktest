@@ -2,6 +2,19 @@
 
 一個用來量測「UDP 延遲與封包遺失」的 Android App。
 
+## 下載安裝
+
+**[⬇ 下載最新版 APK](https://github.com/wallacechen0130/networktest/releases/latest/download/app-debug.apk)**
+
+下載後在手機上點擊該檔案安裝（需允許「安裝未知來源」）。
+
+若上方連結失效，可到 [Releases 頁面](https://github.com/wallacechen0130/networktest/releases) 手動選擇版本。
+
+> **小米 / Redmi / POCO（HyperOS / MIUI）使用者注意**：adb 安裝可能被
+> `INSTALL_FAILED_USER_RESTRICTED` 攔截。請到
+> 設定 → 更多設定 → 開發人員選項 → 開啟「USB 安裝」，
+> 或直接用手機的檔案管理器點擊 APK 安裝。
+
 ## 為什麼需要它
 
 Speedtest 這類工具測的是**下載速度平均值**，看不出真正讓遊戲斷線的問題：
@@ -12,7 +25,7 @@ Speedtest 這類工具測的是**下載速度平均值**，看不出真正讓遊
 
 本 App 逐筆記錄每一次探測的成功／失敗與毫秒數，因此能抓出上述三種 Speedtest 看不到的狀況。
 
-## 設計：四個探測項目是一組「對照實驗」
+## 設計：五個探測項目是一組「對照實驗」
 
 關鍵不是「測 UDP」，而是**同時測四個不同條件的目標**，把變數鎖在單一因素上。
 
